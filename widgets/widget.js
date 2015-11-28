@@ -2,17 +2,25 @@
  * -----------------------------------------------------------------------------
  * @package     smartVISU
  * @author      Martin Gleiß
- * @copyright   2012
+ * @copyright   2012 - 2015
  * @license     GPL [http://www.gnu.de]
  * -----------------------------------------------------------------------------
  */
 
-
-// ----------------------------------------------------------------------------
-// W I D G E T   F U N C T I O N S
-// ----------------------------------------------------------------------------
-
 /**
+ * Class for controlling all widgets.
+ *
+ * Concept:
+ * --------
+ * Every item has a name. The value of the item may be of type: int, float, or
+ * array. The items are stored in the widget.buffer. The drivers will fill the
+ * buffer through the widget.update (and therefore widget.set). Asynchronly
+ * all widgets on a page may be updated. The update is been triggerd from
+ * widget.update, if a item has been changed. Updates are only made if all
+ * items are in buffer needed for that update. If one is missing the update is
+ * not been made. If some plots placed on the page, the update will look if it
+ * is possible to add only one point (if the widget is already initialized).
+ *
  * Events:
  * -------
  * Some new events are introduced to control the widgets and there visual
@@ -50,14 +58,14 @@ $(document).delegate('a[data-widget="basic.button"]', {
 	}
 });
 
-// ----- basic.checkbox -------------------------------------------------------
+// ----- basic.checkbox --------------------------------------------------------
 $(document).delegate('input[data-widget="basic.checkbox"]', {
 	'update': function (event, response) {
 		$(this).prop('checked', response != 0).checkboxradio('refresh');
 	},
 
 	'change': function (event) {
-		// DEBUG: console.log("[basic.checkbox] change '" + this.id + "':", $(this).prop("checked")); 
+		// DEBUG: console.log("[basic.checkbox] change '" + this.id + "':", $(this).prop("checked"));
 		io.write($(this).attr('data-item'), ($(this).prop('checked') ? 1 : 0));
 	}
 });
@@ -220,6 +228,36 @@ $(document).delegate('a[data-widget="basic.dual"]', {
 	}
 });
 
+// ----- basic.multistate ------------------------------------------------------
+$(document).delegate('a[data-widget="basic.multistate"]', {
+	'update': function (event, response) {
+		// get list of values and images
+		list_val = $(this).attr('data-vals').explode();
+		list_img = $(this).attr('data-img').explode();
+		// get the index of the value received
+		idx = list_val.indexOf(response.toString());
+		// update the image
+		$('#' + this.id + ' img').attr('src', list_img[idx]);
+		// memorise the index for next use
+		$(this).attr('index-mem', idx);
+	},
+	'click': function (event) {
+		// get the list of values
+		list_val = $(this).attr('data-vals').explode();
+		// get the last index memorised
+		old_idx = parseInt($(this).attr('index-mem'));
+		//compute the next index
+		var new_idx = old_idx + 1;
+		if (new_idx >= list_val.length) {
+			new_idx = 0;
+		}
+		// send the value to driver
+		io.write($(this).attr('data-item'), list_val[new_idx]);
+		// memorise the index for next use
+		$(this).attr('index-mem', new_idx);
+	}
+});
+
 // ----- basic.flip -----------------------------------------------------------
 $(document).delegate('select[data-widget="basic.flip"]', {
 	'update': function (event, response) {
@@ -227,7 +265,7 @@ $(document).delegate('select[data-widget="basic.flip"]', {
 	},
 
 	'change': function (event) {
-		// DEBUG: console.log("[basic.flip] change '" + this.id + "':", $(this).val());  
+		// DEBUG: console.log("[basic.flip] change '" + this.id + "':", $(this).val());
 		io.write($(this).attr('data-item'), ($(this).val() == 'on' ? 1 : 0));
 	}
 });
@@ -252,36 +290,42 @@ $(document).delegate('[data-widget="basic.formula"]', {
 		var pos = 0;
 		var unit = $(this).attr('data-unit');
 		var mode = $(this).attr('data-formula').substring(0, 3); // functions SUM, AVG, SUB only used, if they are the first 3 chars in formula string
+		var formula = $(this).attr('data-formula');
 
-		if (unit == 'time') {
+		if (unit == 'date' || unit == 'time' || unit == 'short' || unit == 'long') {
 			var date = new Date(response[0]);
-			$("#" + this.id).html(date.transTime());
-		}
-		else if (unit == 'short') {
-			var date = new Date(response[0]);
-			$("#" + this.id).html(date.transShort());
+			$("#" + this.id).html(date.transUnit(unit));
 		}
 		else {
-			if (mode == 'SUB') {
-				calc = response[pos];
-				pos++;
+			if (formula.indexOf('VAR1') > -1) {
+				for (var i = 0; i < response.length; i++) {
+					var myVar = 'VAR' + (i + 1);
+					formula = eval('formula.replace(/' + myVar + '/g, response[i]);');
+				}
+				calc = eval(formula);
 			}
-
-			for (var i = pos; i < response.length; i++) {
+			else {
 				if (mode == 'SUB') {
-					calc = calc - response[i];
+					calc = response[pos];
+					pos++;
 				}
-				else {
-					calc = calc + response[i];
+
+				for (var i = pos; i < response.length; i++) {
+					if (mode == 'SUB') {
+						calc = calc - response[i];
+					}
+					else {
+						calc = calc + response[i];
+					}
 				}
-			}
 
-			if (mode == 'AVG') {
-				calc = calc / i;
-			}
+				if (mode == 'AVG') {
+					calc = calc / i;
+				}
 
-			if (mode != '') {
-				calc = eval($(this).attr('data-formula').replace(/VAR/g, calc).replace(/AVG/g, '').replace(/SUM/g, '').replace(/SUB/g, ''));
+				if (mode != '') {
+					calc = eval(formula.replace(/VAR/g, calc).replace(/AVG/g, '').replace(/SUM/g, '').replace(/SUB/g, ''));
+				}
 			}
 
 			$("#" + this.id).html(parseFloat(calc).transUnit(unit));
@@ -323,18 +367,15 @@ $(document).delegate('div[data-widget="basic.rgb-popup"] > div', {
 	}
 });
 
-// ----- basic.shifter --------------------------------------------------------
+// ----- basic.shifter ---------------------------------------------------------
 $(document).delegate('span[data-widget="basic.shifter"]', {
 	'update': function (event, response) {
 		// response is: {{ gad_value }}, {{ gad_switch }}
 
 		var step = Math.min((response[0] / $(this).attr('data-max') * 10 + 0.49).toFixed(0) * 10, 100);
 
-		if (step > 0 && response[1] != 0) {
+		if (response[1] != 0 && step > 0) {
 			$('#' + this.id + ' img').attr('src', $(this).attr('data-pic-on').replace('00', step));
-		}
-		else if (step > 0 && $(this).attr('data-pic-off').substr(-7) == '_00.png') {
-			$('#' + this.id + ' img').attr('src', $(this).attr('data-pic-off').replace('00', step));
 		}
 		else {
 			$('#' + this.id + ' img').attr('src', $(this).attr('data-pic-off'));
@@ -344,8 +385,11 @@ $(document).delegate('span[data-widget="basic.shifter"]', {
 	'click': function (event) {
 		var items = $(this).attr('data-item').explode();
 
-		if (items[1]) {
-			io.write(items[1], (widget.get(items[1]) == 0 ? 1 : 0));
+		if ($('#' + this.id + ' img').attr('src') == $(this).attr('data-pic-off')) {
+			io.write(items[1], 1);
+		}
+		else {
+			io.write(items[1], 0);
 		}
 	}
 });
@@ -359,7 +403,7 @@ $(document).delegate('span[data-widget="basic.shifter"] > a > img', 'hover', fun
 	}
 });
 
-// ----- basic.shutter --------------------------------------------------------
+// ----- basic.shutter ---------------------------------------------------------
 $(document).delegate('div[data-widget="basic.shutter"]', {
 	'update': function (event, response) {
 		// response is: {{ gad_pos }}, {{ gad_angle }}
@@ -435,7 +479,7 @@ $(document).delegate('div[data-widget="basic.shutter"]', {
 // only every 400ms if it was been moved. There should be no trigger on init.
 $(document).delegate('input[data-widget="basic.slider"]', {
 	'update': function (event, response) {
-		// DEBUG: console.log("[basic.slider] update '" + this.id + "': " + response + " timer: " + $(this).attr('timer') + " lock: " + $(this).attr('lock'));   
+		// DEBUG: console.log("[basic.slider] update '" + this.id + "': " + response + " timer: " + $(this).attr('timer') + " lock: " + $(this).attr('lock'));
 		$(this).attr('lock', 1);
 		$('#' + this.id).val(response).slider('refresh').attr('mem', $(this).val());
 	},
@@ -447,7 +491,7 @@ $(document).delegate('input[data-widget="basic.slider"]', {
 	},
 
 	'change': function (event) {
-		// DEBUG: console.log("[basic.slider] change '" + this.id + "': " + $(this).val() + " timer: " + $(this).attr('timer') + " lock: " + $(this).attr('lock'));   
+		// DEBUG: console.log("[basic.slider] change '" + this.id + "': " + $(this).val() + " timer: " + $(this).attr('timer') + " lock: " + $(this).attr('lock'));
 		if (( $(this).attr('timer') === undefined || $(this).attr('timer') == 0 && $(this).attr('lock') == 0 )
 			&& ($(this).val() != $(this).attr('mem'))) {
 
@@ -463,7 +507,7 @@ $(document).delegate('input[data-widget="basic.slider"]', {
 	},
 
 	'click': function (event) {
-		// $('#' + this.id).attr('mem', $(this).val());       
+		// $('#' + this.id).attr('mem', $(this).val());
 		io.write($(this).attr('data-item'), $(this).val());
 	}
 });
@@ -497,7 +541,7 @@ $(document).delegate('span[data-widget="basic.switch"] > a > img', 'hover', func
 $(document).delegate('span[data-widget="basic.symbol"]', {
 	'update': function (event, response) {
 
-		// response will be an array, if more then one item is requested 
+		// response will be an array, if more then one item is requested
 		var bit = ($(this).attr('data-mode') == 'and');
 		if (response instanceof Array) {
 			for (var i = 0; i < response.length; i++) {
@@ -524,10 +568,12 @@ $(document).delegate('span[data-widget="basic.symbol"]', {
 	}
 });
 
-// ----- basic.tank -----------------------------------------------------------
+// ----- basic.tank ------------------------------------------------------------
 $(document).delegate('div[data-widget="basic.tank"]', {
 	'update': function (event, response) {
-		$('#' + this.id + ' div').css('height', Math.round(Math.min(response / $(this).attr('data-max'), 1) * 180));
+		// $('#' + this.id + ' div').css('height', Math.round(Math.min(response / $(this).attr('data-max'), 1) * 180));
+		$('#' + this.id + ' div').animate({height: Math.round(Math.min(response / $(this).attr('data-max'), 1) * 180)}, 'slow');
+
 	}
 });
 
@@ -548,7 +594,18 @@ $(document).delegate('a[data-widget="basic.trigger"]', {
 // ----- basic.value ----------------------------------------------------------
 $(document).delegate('[data-widget="basic.value"]', {
 	'update': function (event, response) {
-		$('#' + this.id).html(response + ' ' + $(this).attr('data-unit'));
+		var unit = $(this).attr('data-unit');
+
+		if (unit == 'date' || unit == 'time' || unit == 'short' || unit == 'long') {
+			var date = new Date(response);
+			$("#" + this.id).html(date.transUnit(unit));
+		}
+		else if (unit != '' && $.isNumeric(response)) {
+			$("#" + this.id).html(parseFloat(response).transUnit(unit));
+		}
+		else {
+			$("#" + this.id).html(response);
+		}
 	}
 });
 
@@ -583,6 +640,54 @@ $(document).delegate('span[data-widget="clock.miniclock"]', {
 // ----- d e v i c e ----------------------------------------------------------
 // ----------------------------------------------------------------------------
 
+// ----- device.codepad -------------------------------------------------------
+$(document).delegate('div[data-widget="device.codepad"]', {
+	'keyup': function (event) {
+		if(event.keyCode == 13){
+			$('#' + this.id + '-ok').click();
+		}
+	}
+});
+
+$(document).delegate('div[data-widget="device.codepad"] > div > a', {
+	'click': function (event, response) {
+		var node = $(this).parent().parent();
+		var code = $('#' + node.attr('id') + '-code');
+		var key = $(this).attr('data-val');
+
+		if (key == "ok") {
+			if (node.attr('data-val') == code.val()) {
+				// DEBUG: console.log('[device.codepad] ' + node.attr('id') + ' unlocked');
+				$('div[data-bind="' + node.attr('data-id') + '"]').attr('data-access', new Date().getTime()).removeClass('codepad');
+				setTimeout(function () {
+					$('div[data-bind="' + node.attr('data-id') + '"]').attr('data-access', '').addClass('codepad');
+				}, new Date().duration(node.attr('data-duration')).valueOf());
+				node.popup("close");
+			}
+			else {
+				// DEBUG: console.log('[device.codepad] ' + node.attr('id') + ' wrong code ' + code.val());
+				code.val('Wrong Code');
+				code.prop('type', 'text');
+				$('#' + node.attr('id')).addClass('ui-focus');
+				setTimeout(function () {
+					$('#' + node.attr('id')).removeClass('ui-focus');
+				}, 400);
+			}
+		}
+		else if (key == "-") {
+			code.val('');
+			code.prop('type', 'password');
+		}
+		else {
+			if (code.val() == 'Wrong Code') {
+				code.val('');
+				code.prop('type', 'password');
+			}
+			code.val(code.val() + key);
+		}
+	}
+});
+
 // ----- device.rtr -----------------------------------------------------------
 $(document).delegate('div[data-widget="device.rtr"] > div > a[data-icon="minus"]', {
 	'click': function (event, response) {
@@ -607,9 +712,94 @@ $(document).delegate('div[data-widget="device.rtr"] > div > a[data-icon="plus"]'
 });
 
 
-// ----- p l o t --------------------------------------------------------------
-// ----------------------------------------------------------------------------
+// ----- p l o t ---------------------------------------------------------------
+// -----------------------------------------------------------------------------
 
+// ----- plot.minmaxavg ----------------------------------------------------------
+$(document).delegate('div[data-widget="plot.minmaxavg"]', {
+	'update': function (event, response) {
+		// response is: [[t1 , {{ gad.min }}], [t2 , {{ gad.max }}], [t3 , {{ gad.avg }}]]
+
+		var axis = $(this).attr('data-axis').explode();
+		var unit = $(this).attr('data-unit');
+
+		var minValues = response[0];
+		var maxValues = response[1];
+
+		var ranges = [];
+		for (var i = 0; i < minValues.length; i++) {
+			ranges[i] = [minValues[i][0], minValues[i][1], maxValues[i][1]];
+		}
+
+		// draw the plot
+		$('#' + this.id).highcharts({
+			chart: {
+				type: 'columnrange',
+				inverted: false
+			},
+			series: [{
+				data: ranges,
+				enableMouseTracking: false
+			}, {
+				type: 'line',
+				data: response[2]
+			}],
+			xAxis: {
+				type: 'datetime',
+				title: { text: axis[0] }
+			},
+			yAxis: {
+				min: $(this).attr('data-ymin'),
+				max: $(this).attr('data-ymax'),
+				title: { text: axis[1] }
+			},
+			plotOptions: {
+				columnrange: {
+					dataLabels: {
+						enabled: true,
+						formatter: function () {
+							if (unit != '') {
+								return parseFloat(this.y).transUnit(unit);
+							} else {
+								return parseFloat(this.y).transFloat();
+							}
+						}
+					}
+				}
+			},
+			tooltip: {
+				pointFormatter: function() {
+					var value = this.y;
+					if (unit != '') {
+						value = parseFloat(this.y).transUnit(unit);
+					} else {
+						value = parseFloat(this.y).transFloat();
+					}
+					return '<span style="color:' + this.color + '">\u00D8</span>  <b>' + value + '</b><br/>'
+				}
+			},
+			legend: { enabled: false }
+		});
+
+	},
+
+	'point': function (event, response) {
+		var count = $(this).attr('data-count');
+		if (count < 1) {
+			count = 100;
+		}
+
+		var minValues = response[0];
+		var maxValues = response[1];
+
+		for (var i = 0; i < minValues.length; i++) {
+			var chart = $('#' + this.id).highcharts();
+			chart.series[0].addPoint([minValues[i][0], minValues[i][1], maxValues[i][1]], false, (chart.series[i].data.length >= count));
+			chart.series[1].addPoint(response[2][i], false, (chart.series[i].data.length >= count));
+			chart.redraw();
+		}
+	}
+});
 // ----- plot.comfortchart ----------------------------------------------------
 $(document).delegate('div[data-widget="plot.comfortchart"]', {
 	'update': function (event, response) {
@@ -649,18 +839,20 @@ $(document).delegate('div[data-widget="plot.comfortchart"]', {
 			data: [
 				[response[0] * 1.0, response[1] * 1.0]
 			],
-			marker: { enabled: true, lineWidth: 2, radius: 6, symbol: 'circle' },
+			marker: {enabled: true, lineWidth: 2, radius: 6, symbol: 'circle'},
 			showInLegend: false
 		};
 
 		$('#' + this.id).highcharts({
 			series: plots,
-			xAxis: { min: 10, max: 35, title: { text: axis[0], align: 'high', margin: -2 } },
-			yAxis: { min: 0, max: 100, title: { text: axis[1], margin: 7 } },
-			plotOptions: { area: { enableMouseTracking: false } },
-			tooltip: { formatter: function () {
-				return this.x.transUnit('temp') + ' / ' + this.y.transUnit('%');
-			} }
+			xAxis: {min: 10, max: 35, title: {text: axis[0], align: 'high', margin: -2}},
+			yAxis: {min: 0, max: 100, title: {text: axis[1], margin: 7}},
+			plotOptions: {area: {enableMouseTracking: false}},
+			tooltip: {
+				formatter: function () {
+					return this.x.transUnit('temp') + ' / ' + this.y.transUnit('%');
+				}
+			}
 		});
 	},
 
@@ -678,10 +870,113 @@ $(document).delegate('div[data-widget="plot.comfortchart"]', {
 	}
 });
 
+
+// ----- plot.multiaxes ----------------------------------------------------------
+$(document).delegate('div[data-widget="plot.multiaxis"]', {
+	'update': function (event, response) {
+		// response is: [ [ [t1, y1], [t2, y2] ... ], [ [t1, y1], [t2, y2] ... ], ... ] 
+
+		var ymin = [];
+		if ($(this).attr('data-ymin')) { ymin = $(this).attr('data-ymin').explode(); }
+
+		var ymax = [];
+		if ($(this).attr('data-ymax')) { ymax = $(this).attr('data-ymax').explode(); }
+
+		var label = $(this).attr('data-label').explode();
+		var color = $(this).attr('data-color').explode();
+		var exposure = $(this).attr('data-exposure').explode();
+		var axis = $(this).attr('data-axis').explode();
+		var zoom = $(this).attr('data-zoom');
+
+		var assign = [];
+		if ($(this).attr('data-assign')) { assign = $(this).attr('data-assign').explode(); }
+
+		var opposite = [];
+		if ($(this).attr('data-opposite')) { opposite = $(this).attr('data-opposite').explode(); }
+
+		var ycolor = [];
+		if ($(this).attr('data-ycolor')) { ycolor = $(this).attr('data-ycolor').explode(); }
+
+		var series = [];
+		var yaxis = [];
+
+		var i = 0;
+		
+		// series
+		for (i = 0; i < response.length; i++) {
+			series[i] = {
+				type: (exposure[i] != 'stair' ? exposure[i] : 'line'),
+				step: (exposure[i] == 'stair' ? 'left' : false),
+				name: label[i],
+				data: response[i],
+				color: (color[i] ? color[i] : null),
+				yAxis: (assign[i] ? assign[i] - 1 : 0)
+			};
+		}
+
+		// y-axis
+		for (i = 0; i < axis.length - 1; i++) {
+			yaxis[i] = {
+				min: (ymin[i] ? ymin[i] : null),
+				max: (ymax[i] ? ymax[i] : null),
+				title: {text: axis[i + 1]},
+				opposite: (opposite[i] > 0),
+				minPadding: 0.05,
+				maxPadding: 0.05,
+				endOnTick: false,
+				startOnTick: false
+			};
+			if (ycolor[i]) {
+				yaxis[i].lineColor = ycolor[i];
+				yaxis[i].tickColor = ycolor[i];
+			}
+		}
+
+		// draw the plot 
+		if (zoom) {
+			$('#' + this.id).highcharts({
+				chart: {
+					zoomType: 'x'
+				},
+				series: series,
+				xAxis: {type: 'datetime', title: {text: axis[0]}, minRange: new Date().duration(zoom).valueOf()},
+				yAxis: yaxis
+			});
+		}
+		else {
+			$('#' + this.id).highcharts({
+				series: series,
+				xAxis: {type: 'datetime', title: {text: axis[0]}},
+				yAxis: yaxis
+			});
+		}
+
+	},
+
+	'point': function (event, response) {
+		var count = $(this).attr('data-count');
+		if (count < 1) {
+			count = 100;
+		}
+		for (var i = 0; i < response.length; i++) {
+			if (response[i]) {
+				var chart = $('#' + this.id).highcharts();
+
+				// more points?
+				for (var j = 0; j < response[i].length; j++) {
+					chart.series[i].addPoint(response[i][j], false, (chart.series[i].data.length >= count));
+				}
+				chart.redraw();
+			}
+		}
+	}
+});
+
+
 // ----- plot.period ----------------------------------------------------------
 $(document).delegate('div[data-widget="plot.period"]', {
 	'update': function (event, response) {
-		// response is: [ [ [t1, y1], [t2, y2] ... ], [ [t1, y1], [t2, y2] ... ], ... ] 
+		// response is: [ [ [t1, y1], [t2, y2] ... ], [ [t1, y1], [t2, y2] ... ], ... ]
 
 		var label = $(this).attr('data-label').explode();
 		var color = $(this).attr('data-color').explode();
@@ -703,29 +998,33 @@ $(document).delegate('div[data-widget="plot.period"]', {
 		// draw the plot
 		if (zoom) {
 			$('#' + this.id).highcharts({
-				chart: { zoomType: 'x' },
+				chart: {zoomType: 'x'},
 				series: series,
-				xAxis: { type: 'datetime', title: { text: axis[0] }, minRange: new Date().duration(zoom).valueOf() },
-				yAxis: { min: $(this).attr('data-ymin'), max: $(this).attr('data-ymax'), title: { text: axis[1] } }
+				xAxis: {type: 'datetime', title: {text: axis[0]}, minRange: new Date().duration(zoom).valueOf()},
+				yAxis: {min: $(this).attr('data-ymin'), max: $(this).attr('data-ymax'), title: {text: axis[1]}}
 			});
 		}
 		else {
 			$('#' + this.id).highcharts({
 				series: series,
-				xAxis: { type: 'datetime', title: { text: axis[0] } },
-				yAxis: { min: $(this).attr('data-ymin'), max: $(this).attr('data-ymax'), title: { text: axis[1] } }
+				xAxis: {type: 'datetime', title: {text: axis[0]}},
+				yAxis: {min: $(this).attr('data-ymin'), max: $(this).attr('data-ymax'), title: {text: axis[1]}}
 			});
 		}
 	},
 
 	'point': function (event, response) {
+		var count = $(this).attr('data-count');
+		if (count < 1) {
+			count = 100;
+		}
 		for (var i = 0; i < response.length; i++) {
 			if (response[i]) {
 				var chart = $('#' + this.id).highcharts();
 
 				// more points?
 				for (var j = 0; j < response[i].length; j++) {
-					chart.series[i].addPoint(response[i][j], false, (chart.series[i].data.length >= 100));
+					chart.series[i].addPoint(response[i][j], false, (chart.series[i].data.length >= count));
 				}
 				chart.redraw();
 			}
@@ -736,7 +1035,7 @@ $(document).delegate('div[data-widget="plot.period"]', {
 // ----- plot.rtr -------------------------------------------------------------
 $(document).delegate('div[data-widget="plot.rtr"]', {
 	'update': function (event, response) {
-		// response is: {{ gad_actual }}, {{ gad_set }}, {{ gat_state }} 
+		// response is: {{ gad_actual }}, {{ gad_set }}, {{ gat_state }}
 
 		var label = $(this).attr('data-label').explode();
 		var axis = $(this).attr('data-axis').explode();
@@ -761,14 +1060,14 @@ $(document).delegate('div[data-widget="plot.rtr"]', {
 
 		// draw the plot
 		$('#' + this.id).highcharts({
-			chart: { type: 'line' },
+			chart: {type: 'line'},
 			series: [
 				{
 					name: label[0], data: response[0], type: 'spline'
-				} ,
+				},
 				{
 					name: label[1], data: response[1], dashStyle: 'shortdot', step: 'left'
-				} ,
+				},
 				{
 					type: 'pie', name: '∑ On: ',
 					data: [
@@ -779,27 +1078,33 @@ $(document).delegate('div[data-widget="plot.rtr"]', {
 							name: 'Off', y: (100 - percent), color: null
 						}
 					],
-					center: [ '95%', '90%' ],
+					center: ['95%', '90%'],
 					size: 35,
 					showInLegend: false,
-					dataLabels: { enabled: false }
+					dataLabels: {enabled: false}
 				}
 			],
-			xAxis: { type: 'datetime' },
-			yAxis: { min: $(this).attr('data-min'), max: $(this).attr('data-max'), title: { text: axis[1] } },
-			tooltip: { formatter: function () {
-				return this.series.name + ' <b>' + (this.percentage ? this.y.transUnit('%') : this.y.transUnit('temp')) + '</b>';
-			}}
+			xAxis: {type: 'datetime'},
+			yAxis: {min: $(this).attr('data-min'), max: $(this).attr('data-max'), title: {text: axis[1]}},
+			tooltip: {
+				formatter: function () {
+					return this.series.name + ' <b>' + (this.percentage ? this.y.transUnit('%') : this.y.transUnit('temp')) + '</b>';
+				}
+			}
 		});
 	},
 
 	'point': function (event, response) {
+		var count = $(this).attr('data-count');
+		if (count < 1) {
+			count = 100;
+		}
 		for (var i = 0; i < response.length; i++) {
 			var chart = $('#' + this.id).highcharts();
 
 			if (response[i] && (i == 0 || i == 1)) {
 				for (var j = 0; j < response[i].length; j++) {
-					chart.series[i].addPoint(response[i][j], false, (chart.series[i].data.length >= 100));
+					chart.series[i].addPoint(response[i][j], false, (chart.series[i].data.length >= count));
 				}
 			}
 			else if (response[i] && (i == 2)) {
@@ -810,7 +1115,7 @@ $(document).delegate('div[data-widget="plot.rtr"]', {
 	}
 });
 
-// ----- plot.temprose --------------------------------------------------------
+// ----- plot.temprose -----------------------------------------------------
 $(document).delegate('div[data-widget="plot.temprose"]', {
 	'update': function (event, response) {
 		// response is: {{ gad_actual_1, gad_actual_2, gad_actual_3, gad_set_1, gad_set_2, gad_set_3 }}
@@ -834,14 +1139,16 @@ $(document).delegate('div[data-widget="plot.temprose"]', {
 		}
 
 		$('#' + this.id).highcharts({
-			chart: {polar: true, type: 'line', marginLeft: 10 },
+			chart: {polar: true, type: 'line', marginLeft: 10},
 			series: plots,
-			xAxis: { categories: axis, tickmarkPlacement: 'on', lineWidth: 0 },
-			yAxis: { gridLineInterpolation: 'polygon', lineWidth: 0 },
-			tooltip: { formatter: function () {
-				return this.x + ' - ' + this.series.name + ': <b>' + this.y.transUnit('temp') + '</b>';
-			} },
-			legend: { x: 10, layout: 'vertical' }
+			xAxis: {categories: axis, tickmarkPlacement: 'on', lineWidth: 0},
+			yAxis: {gridLineInterpolation: 'polygon', lineWidth: 0},
+			tooltip: {
+				formatter: function () {
+					return this.x + ' - ' + this.series.name + ': <b>' + this.y.transUnit('temp') + '</b>';
+				}
+			},
+			legend: {x: 10, layout: 'vertical'}
 		});
 	},
 
@@ -862,6 +1169,25 @@ $(document).delegate('div[data-widget="plot.temprose"]', {
 
 // ----- s t a t u s -----------------------------------------------------------
 // -----------------------------------------------------------------------------
+
+// ----- status.collapse -------------------------------------------------------
+$(document).delegate('span[data-widget="status.collapse"]', {
+	'update': function (event, response) {
+		// response is: {{ gad_trigger }}
+
+		if (response[0] != 0) {
+			$('div[data-bind="' + $(this).attr('data-id') + '"]').not('.ui-collapsible').show();
+			$('div[data-bind="' + $(this).attr('data-id') + '"].ui-popup').popup("open");
+			$('div[data-bind="' + $(this).attr('data-id') + '"]').trigger("expand");
+		}
+		else {
+			$('div[data-bind="' + $(this).attr('data-id') + '"]').not('.ui-collapsible').hide();
+			$('div[data-bind="' + $(this).attr('data-id') + '"].ui-popup').popup("close");
+			$('div[data-bind="' + $(this).attr('data-id') + '"]').trigger("collapse");
+		}
+	}
+});
+
 
 // ----- status.log -----------------------------------------------------------
 $(document).delegate('span[data-widget="status.log"]', {
@@ -898,6 +1224,23 @@ $(document).delegate('span[data-widget="status.notify"]', {
 	}
 });
 
+// ----- status.message -------------------------------------------------------
+$(document).delegate('span[data-widget="status.message"]', {
+	'update': function (event, response) {
+		// response is: {{ gad_trigger }}, {{ gad_message }}
+
+		if (response[0] != 0) {
+			$('#' + this.id + '-message p span').html(response[1] ? '<b>' + response[1] + '</b><br />' : '');
+			$('#' + this.id + '-message .stamp').html(response[2] ? new Date(response[2]).transShort() : new Date().transShort());
+			$('#' + this.id + '-message').popup('open');
+			console.log (this.id + ' open ' +response[0]);
+		}
+		else {
+			$('#' + this.id + '-message').popup('close');
+			console.log (this.id + ' ' +response[0]); 
+		}
+	}
+});
 
 // ----- i c o n --------------------------------------------------------------
 // ----------------------------------------------------------------------------
@@ -930,13 +1273,11 @@ $(document).delegate('svg[data-widget="icon.arrow"]', {
 		var ang = response[0] / $(this).attr('data-max') * 2 * Math.PI;
 
 		var pt = [];
-		pt = pt.concat([50, 50], fx.rotate([25, 50], ang, [50, 50]), fx.rotate([50, 18], ang, [50, 50]), fx.rotate([75,
-			50], ang, [50, 50]), [50, 50]);
+		pt = pt.concat([50, 50], fx.rotate([25, 50], ang, [50, 50]), fx.rotate([50, 18], ang, [50, 50]), fx.rotate([75, 50], ang, [50, 50]), [50, 50]);
 		$('#' + this.id + ' #line0').attr('points', pt.toString());
 
 		pt = [];
-		pt = pt.concat(fx.rotate([32, 50], ang, [50, 50]), fx.rotate([32, 60], ang, [50, 50]), fx.rotate([68, 60], ang,
-			[50, 50]), fx.rotate([68, 50], ang, [50, 50]));
+		pt = pt.concat(fx.rotate([32, 50], ang, [50, 50]), fx.rotate([32, 60], ang, [50, 50]), fx.rotate([68, 60], ang, [50, 50]), fx.rotate([68, 50], ang, [50, 50]));
 		$('#' + this.id + ' #line1').attr('points', pt.toString());
 	}
 });
@@ -946,7 +1287,7 @@ $(document).delegate('svg[data-widget="icon.battery"]', {
 	'update': function (event, response) {
 		// response is: {{ gad_value }}, {{ gad_switch }}
 
-		var val = Math.round(response[0] / $(this).attr('data-max') * 40);
+		var val = Math.floor(response[0] / $(this).attr('data-max') * 40 / 6) * 6;
 		fx.grid(this, val, [39, 68], [61, 28]);
 	}
 });
@@ -956,7 +1297,7 @@ $(document).delegate('svg[data-widget="icon.blade"]', {
 	'update': function (event, response) {
 		// response is: {{ gad_value }}, {{ gad_switch }}
 
-		// calculate angle in (0 - ~90°)
+		// calculate angle in (0 - ~90�)
 		var ang = response[0] / $(this).attr('data-max') * 0.4 * Math.PI;
 		var pt;
 
@@ -973,7 +1314,7 @@ $(document).delegate('svg[data-widget="icon.blade_z"]', {
 	'update': function (event, response) {
 		// response is: {{ gad_value }}, {{ gad_switch }}
 
-		// calculate angle in (0 - 90°)
+		// calculate angle in (0 - 90�)
 		var ang = response[0] / $(this).attr('data-max') * 0.5 * Math.PI * -1;
 
 		var pt = [];
@@ -991,7 +1332,7 @@ $(document).delegate('svg[data-widget="icon.blade_arc"]', {
 	'update': function (event, response) {
 		// response is: {{ gad_value }}, {{ gad_switch }}
 
-		// calculate angle in (0 - 90°)
+		// calculate angle in (0 - 90�)
 		var ang = response[0] / $(this).attr('data-max') * -0.7 * Math.PI + 0.35 * Math.PI;
 		var pt;
 
@@ -1055,6 +1396,20 @@ $(document).delegate('svg[data-widget="icon.graph"]', {
 	}
 });
 
+// ----- icon.light ---------------------------------------------------------
+$(document).delegate('svg[data-widget="icon.light"]', {
+	'update': function (event, response) {
+		// response is: {{ gad_value }}, {{ gad_switch }}
+		var val = Math.round(response[0] / $(this).attr('data-max') * 10);
+		// Iterate over all child elements
+		var i = 1;
+		$('#' + this.id + ' g#light-rays line').each(function () {
+			$(this).css("visibility", (val >= i ? "visible" : "hidden"));
+			i++;
+		});
+	}
+});
+
 // ----- icon.meter -----------------------------------------------------------
 $(document).delegate('svg[data-widget="icon.meter"]', {
 	'update': function (event, response) {
@@ -1072,6 +1427,37 @@ $(document).delegate('svg[data-widget="icon.shutter"]', {
 
 		var val = Math.round(response[0] / $(this).attr('data-max') * 38);
 		fx.grid(this, val, [14, 30], [86, 68]);
+	}
+});
+
+// ----- icon.ventilation -----------------------------------------------------
+$(document).delegate('svg[data-widget="icon.ventilation"]', {
+	'update': function (event, response) {
+		// response is: {{ gad_value }}, {{ gad_switch }}
+
+		var val = (1 - response[0] / $(this).attr('data-max')) * 4.5 + 0.5;
+		$('#' + this.id + ' #anim').attr('dur', (response[0] > 0 ? val : 0));
+	}
+});
+
+// ----- icon.volume ---------------------------------------------------------
+$(document).delegate('svg[data-widget="icon.volume"]', {
+	'update': function (event, response) {
+		// response is: {{ gad_value }}, {{ gad_switch }}
+
+		var val = Math.round(response[0] / $(this).attr('data-max') * 71);
+		// fx.bar(this, val, [left, bottom], [right, top]);
+		fx.bar(this, val, [18, 68], [89, 50]);
+	}
+});
+
+// ----- icon.windmill --------------------------------------------------------
+$(document).delegate('svg[data-widget="icon.windmill"]', {
+	'update': function (event, response) {
+		// response is: {{ gad_value }}, {{ gad_switch }}
+
+		var val = (1 - response[0] / $(this).attr('data-max')) * 4.5 + 0.5;
+		$('#' + this.id + ' #anim').attr('dur', (response[0] > 0 ? val : 0));
 	}
 });
 
@@ -1113,5 +1499,18 @@ $(document).delegate('svg[data-widget="icon.windsock"]', {
 		pt = [];
 		pt = pt.concat(fx.rotate([70, 40], ang, [80, 22]), fx.rotate([76, 82], ang, [80, 22]), fx.rotate([84, 82], ang, [80, 22]), fx.rotate([90, 40], ang, [80, 22]));
 		$('#' + this.id + ' #part3').attr('points', pt.toString());
+	}
+});
+
+// ----- icon.zenith ----------------------------------------------------------
+$(document).delegate('svg[data-widget="icon.zenith"]', {
+	'update': function (event, response) {
+		// response is: {{ gad_value }}, {{ gad_switch }}
+
+		var ang = response[0] / $(this).attr('data-max') * Math.PI;
+		pt = fx.rotate([10, 90], ang, [50, 90]);
+		
+		$('#' + this.id + ' #sun').attr('x', pt[0] - 50);
+		$('#' + this.id + ' #sun').attr('y', pt[1] - 50);
 	}
 });

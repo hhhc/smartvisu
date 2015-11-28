@@ -2,7 +2,7 @@
  * -----------------------------------------------------------------------------
  * @package     smartVISU
  * @author      Martin Gleiß
- * @copyright   2012
+ * @copyright   2012 - 2015
  * @license     GPL [http://www.gnu.de]
  * -----------------------------------------------------------------------------
  */
@@ -135,7 +135,7 @@ var io = {
 					break;
 
 				case 'series':
-					data.sid = data.sid.substr(0, data.sid.length - 3) + '0';
+					data.sid = data.sid.substr(0, data.sid.length);
 					widget.update(data.sid.replace(/\|/g, '\.'), data.series);
 					break;
 
@@ -168,6 +168,11 @@ var io = {
 						notify.warning('Driver: smarthome.py', 'Protocol mismatch<br />smartVISU driver is: v' + io.version + '<br />SmartHome.py is: v' + proto + '<br /><br /> Update the system!');
 					}
 					break;
+
+				case 'url':
+					$.mobile.changePage(data.url);
+                                   break;
+
 			}
 		};
 
@@ -199,7 +204,7 @@ var io = {
 			// items
 			io.send({'cmd': 'monitor', 'items': widget.listeners()});
 		}
-		
+
 		// plot (avg, min, max, on)
 		var unique = Array();
 		widget.plot().each(function (idx) {
@@ -207,10 +212,10 @@ var io = {
 			for (var i = 0; i < items.length; i++) {
 
 				var pt = items[i].split('.');
-				
+
 				if (!unique[items[i]] && !widget.get(items[i]) && (pt instanceof Array) && widget.checkseries(items[i])) {
-					var item = items[i].substr(0, items[i].length - 3 - pt[pt.length - 3].length - pt[pt.length - 2].length - pt[pt.length - 1].length);
-					io.send({'cmd': 'series', 'item': item, 'series': pt[pt.length - 3], 'start': pt[pt.length - 2]});
+					var item = items[i].substr(0, items[i].length - 4 - pt[pt.length - 4].length - pt[pt.length - 3].length - pt[pt.length - 2].length - pt[pt.length - 1].length);
+					io.send({'cmd': 'series', 'item': item, 'series': pt[pt.length - 4], 'start': pt[pt.length - 3], 'count': pt[pt.length - 1]});
 					unique[items[i]] = 1;
 				}
 			}

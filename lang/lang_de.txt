@@ -25,6 +25,7 @@ $lang['format']['v']			    = '%01,0f V';
 $lang['format']['a']			    = '%01,2f A';
 $lang['format']['w']			    = '%01,2f W';
 $lang['format']['kwh']			    = '%01,2f kWh';
+$lang['format']['h']			    = '%01,1f h';
 
 $lang['format']['date']				= 'd.m.y';
 $lang['format']['time']				= 'H:i';
